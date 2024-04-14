@@ -17,7 +17,7 @@
             <RowDefinition Height="45" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="1.5*"
+            <ColumnDefinition Width="0.5*"
                               MinWidth="200" />
             <ColumnDefinition Width="auto" />
             <ColumnDefinition Width="*" 
@@ -30,13 +30,25 @@
                  Margin="10 5"
                  FontSize="20" />
 
-        <Button Grid.Row="0"
-                Grid.Column="2"
-                Name="SearchButton"
-                Margin="10 5"
-                FontSize="15"
-                Content="Поиск" />
+        <Grid Grid.Row="0"
+              Grid.Column="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition />
+                <ColumnDefinition />
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="0"
+                    Name="SearchButton"
+                    Margin="10 5"
+                    FontSize="15"
+                    Content="Поиск" />
 
+            <Button Grid.Column="1"
+                    Name="ImportButton"
+                    Margin="10 5"
+                    FontSize="15"
+                    Content="Импорт" />
+        </Grid>
+       
         <TextBlock Grid.Row="1"
                    Grid.Column="0"
                    FontSize="15"
@@ -58,7 +70,7 @@
                   ItemsSource="{Binding ResaultSearch, Mode=TwoWay}">
             <TreeView.ItemTemplate>
                 <HierarchicalDataTemplate ItemsSource="{Binding ResaultSearch}">
-                    <TextBlock Text="{Binding CVEidentifier}" />
+                    <TextBlock Text="{Binding Identifier}" />
                 </HierarchicalDataTemplate>
             </TreeView.ItemTemplate>
         </TreeView>
@@ -106,8 +118,8 @@
 
         <Grid Grid.Row="3"
               Grid.Column="2">
-            <TextBlock Margin="10 5" 
-                       Text="ИНФОРМАЦИЯ О СОСТОЯНИИ ПОИСКА"
+            <TextBlock Margin="10 5"
+                       Text="{Binding ExMessage}"
                        VerticalAlignment="Top"
                        HorizontalAlignment="Left"
                        FontSize="10"

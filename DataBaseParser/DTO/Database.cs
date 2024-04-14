@@ -47,13 +47,13 @@ namespace DataBaseParser.DTO
 
     public class Vulnerability : ObservedObject, IVulnerability
     {
-        private string _cveIdentifier;
-        public string CVEidentifier
+        private string _Identifier;
+        public string Identifier
         {
-            get =>_cveIdentifier; 
+            get =>_Identifier; 
             set 
             {
-                _cveIdentifier = value;
+                _Identifier = value;
                 OnPropertyChanged();
             }
         }

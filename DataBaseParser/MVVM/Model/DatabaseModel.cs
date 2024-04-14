@@ -1,23 +1,29 @@
 ﻿using Aspose.Cells;
 using DataBaseParser.DTO;
+using HtmlAgilityPack;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace DataBaseParser.MVVM.Model
 {
     class DatabaseModel
     {
-        private HttpClient httpClient;
+        private HttpClient? httpClient;
 
-        public async Task<ObservableCollection<Vulnerability>> UpdateByInstallationLink(string address, string searchText)
+        public async Task<ObservableCollection<Vulnerability>?> UpdateByInstallationLink(string address, string searchText)
         {
-            if(!File.Exists(Path.Combine(Environment.CurrentDirectory, "FSTEC.xlsx"))) 
+            if (searchText == string.Empty)
+                throw new ArgumentException("Строка для поиска пуста");
+
+            if (!File.Exists(Path.Combine(Environment.CurrentDirectory, "FSTEC.xlsx")))
                 await DownloadFileFromLink(address);
 
             try
@@ -27,36 +33,59 @@ namespace DataBaseParser.MVVM.Model
                 using Workbook workbook = new(Path.Combine(Environment.CurrentDirectory, "FSTEC.xlsx"));
                 using Worksheet worksheet = workbook.Worksheets[0];
 
-                var rows = worksheet.Cells.MaxDataRow;
-                var cols = worksheet.Cells.MaxDataColumn;
+                var numberRows = worksheet.Cells.MaxDataRow;
+                var numberColumn = worksheet.Cells.MaxDataColumn;
 
-                for (int i = 3; i < rows; i++)
+                for (int rowIterator = 3; rowIterator < numberRows; rowIterator++)
                 {
-                    for (int j = 0; j < cols; j++)
+                    for (int columnIterator = 0; columnIterator < numberColumn; columnIterator++)
                     {
-                        string currentString = Convert.ToString(worksheet.Cells[i, j].Value);
+                        string currentString = Convert.ToString(worksheet.Cells[rowIterator, columnIterator].Value);
+
                         if (currentString.Contains(searchText, StringComparison.OrdinalIgnoreCase))
                         {
                             Vulnerability vulnerability = new() { ParameterAndDescription = new() };
 
-                            for (int k = 0; k < cols; k++)
+                            for (int lineIterator = 0; lineIterator < numberColumn; lineIterator++)
                             {
-                                if (k is 18)
+                                if (lineIterator is 18)
                                     continue;
-                                vulnerability.ParameterAndDescription.Add((string)worksheet.Cells[2, k].Value, Convert.ToString(worksheet.Cells[i, k].Value));
+                                vulnerability.ParameterAndDescription.Add((string)worksheet.Cells[2, lineIterator].Value, Convert.ToString(worksheet.Cells[rowIterator, lineIterator].Value));
                             }
-                            vulnerability.CVEidentifier = Convert.ToString(worksheet.Cells[i, 0].Value); //(string)worksheet.Cells[i, 18].Value ?? 
+                            vulnerability.Identifier = Convert.ToString(worksheet.Cells[rowIterator, 0].Value);
                             vulnerabilitys.Add(vulnerability);
                             break;
-                        }                    
+                        }
                     }
-                    
                 }
                 return vulnerabilitys;
             }
-            catch { return null; }
-            finally { }
-                 
+            catch (HttpRequestException ex)
+            {
+                //проблемы с сервером
+                return null;
+            }
+            catch (TaskCanceledException ex)
+            {
+                if (ex.CancellationToken.IsCancellationRequested)
+                {
+                    //истекло время запроса
+                }
+                else
+                {
+                    //другая ошибка
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                //другие ошибки
+                return null;
+            }
+            finally
+            {
+                httpClient.Dispose();
+            }
         }
 
         private async Task DownloadFileFromLink(string address)
@@ -68,24 +97,53 @@ namespace DataBaseParser.MVVM.Model
                 (httpRequestMessage, cert, cetChain, policyErrors) => { return true; }
             };
 
-            httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-            using HttpRequestMessage request = new(HttpMethod.Get, address);
-            var response = await httpClient.SendAsync(request);
-
-            if (response.IsSuccessStatusCode)
+            try
             {
-                using Stream stream = await response.Content.ReadAsStreamAsync();
+                httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+                using HttpRequestMessage request = new(HttpMethod.Get, address);
+                var response = await httpClient.SendAsync(request);
 
-                Process[] processList;
-                processList = Process.GetProcessesByName("EXCEL");
-                foreach (Process proc in processList) { proc.Kill(); }
+                if (response.IsSuccessStatusCode)
+                {
+                    using Stream stream = await response.Content.ReadAsStreamAsync();
 
-                await stream.CopyToAsync(new FileStream(Path.Combine(Environment.CurrentDirectory, "FSTEC.xlsx"), FileMode.Create));
+                    Process[] processList;
+                    processList = Process.GetProcessesByName("EXCEL");
+                    foreach (Process proc in processList) { proc.Kill(); }
+
+                    await stream.CopyToAsync(new FileStream(Path.Combine(Environment.CurrentDirectory, "FSTEC.xlsx"), FileMode.Create));
+                }
+                else
+                {
+                    throw new Exception(GetExceptionMessage(response.StatusCode));
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                //проблемы с сервером
+            }
+            catch (TaskCanceledException ex)
+            {
+                if (ex.CancellationToken.IsCancellationRequested)
+                {
+                    //истекло время запроса
+                }
+                else
+                {
+                    //другая ошибка
+                }
+            }
+            catch (Exception ex)
+            {
+                //другие ошибки
+            }
+            finally
+            {
                 httpClient.Dispose();
             }
         }
 
-        private async Task<string> GetJsonStringByApi(string apiKey, string address)
+        private async Task<string?> GetJsonStringByApi(string apiKey, string address)
         {
             try
             {
@@ -93,19 +151,33 @@ namespace DataBaseParser.MVVM.Model
                 using HttpRequestMessage request = new(HttpMethod.Get, address);
                 request.Headers.Add("User-Agent", $"{apiKey}");
                 using HttpResponseMessage response = httpClient.Send(request);
+
                 if (response.IsSuccessStatusCode)
+                    return await response.Content.ReadAsStringAsync();
+                else
+                    throw new Exception(GetExceptionMessage(response.StatusCode));
+            }
+            catch (HttpRequestException ex)
+            {
+                //проблемы с сервером
+                return null;
+            }
+            catch (TaskCanceledException ex)
+            {
+                if (ex.CancellationToken.IsCancellationRequested)
                 {
-                    string content = await response.Content.ReadAsStringAsync();
-                    return content;
+                    //истекло время запроса
                 }
                 else
                 {
-                    return string.Empty;
+                    //другая ошибка
                 }
+                return null;
             }
-            catch (TimeoutException ex)
+            catch (Exception ex)
             {
-                return string.Empty;
+                //другие ошибки
+                return null;
             }
             finally
             {
@@ -115,77 +187,115 @@ namespace DataBaseParser.MVVM.Model
 
         public ObservableCollection<Vulnerability> UpdateByApiRequest(string apiKey, string address)
         {
-            string threatLines = GetJsonStringByApi(apiKey, address).Result;
+            string responseString = GetJsonStringByApi(apiKey, address).Result ?? throw new ArgumentException("Строка поиска пуста");
 
-            try
+            var json = JToken.Parse(responseString);
+            var trips = json["vulnerabilities"];
+            ObservableCollection<Vulnerability> vulnerabilitys = new();
+
+            foreach (JToken trip in trips)
             {
-                var json = JToken.Parse(threatLines);
-                var trips = json["vulnerabilities"];
-                ObservableCollection<Vulnerability> vulnerabilitys = new();
+                List<string> referencesList = new();
+                Vulnerability vulnerability = new();
 
-                foreach (JToken trip in trips)
+                var cve = trip["cve"];
+                var id = cve["id"];
+                var references = cve["references"];
+                var metrics = cve["metrics"];
+                var cvssData = (metrics["cvssMetricV2"]?.First["cvssData"] ?? metrics["cvssMetricV31"]?.First["cvssData"]) ?? null;
+
+                if (cvssData is not null)
                 {
-                    List<string> referencesList = new();
-                    Vulnerability vulnerability = new();
+                    var vectorString = cvssData["vectorString"] ?? "Парметр не задан";
+                    var baseScore = cvssData["baseScore"] ?? "Парметр не задан";
+                    var version = cvssData["version"] ?? "Парметр не задан";
+                    var accessComplexity = cvssData["accessComplexity"] ?? "Парметр не задан";
+                    var confidentialityImpact = cvssData["confidentialityImpact"] ?? "Парметр не задан";
+                    var integrityImpact = cvssData["integrityImpact"] ?? "Парметр не задан";
+                    var availabilityImpact = cvssData["availabilityImpact"] ?? "Парметр не задан";
 
-                    var cve = trip["cve"];
-                    var id = cve["id"];
-                    var sourceIdentifier = cve["sourceIdentifier"];
-                    var description = cve["descriptions"].First["value"];
-                    var lastModified = cve["lastModified"];
-                    var published = cve["published"];
-                    var vulnStatus = cve["vulnStatus"];
-                    var references = cve["references"];
-
-                    var metrics = cve["metrics"];
-                    var cvssData = (metrics["cvssMetricV2"]?.First["cvssData"] ?? metrics["cvssMetricV31"]?.First["cvssData"]) ?? null;
-                    if(cvssData is not null)
-                    {
-                        var vectorString = cvssData["vectorString"] ?? "Парметр не задан";
-                        var baseScore = cvssData["baseScore"] ?? "Парметр не задан";
-                        var version = cvssData["version"] ?? "Парметр не задан";
-                        var accessComplexity = cvssData["accessComplexity"] ?? "Парметр не задан";
-                        var confidentialityImpact = cvssData["confidentialityImpact"] ?? "Парметр не задан";
-                        var integrityImpact = cvssData["integrityImpact"] ?? "Парметр не задан";
-                        var availabilityImpact = cvssData["availabilityImpact"] ?? "Парметр не задан";
-
-                        vulnerability.ParameterAndDescription = new()
+                    vulnerability.ParameterAndDescription = new()
                                 {
-                                    { "Последнее изменение", (string)lastModified },
-                                    { "Описание", (string)description },
-                                    { "Идентификатор источника", (string)sourceIdentifier },
+                                    { "Последнее изменение", (string)cve["lastModified"] },
+                                    { "Описание", (string)cve["descriptions"].First["value"] },
+                                    { "Идентификатор источника", (string)cve["sourceIdentifier"] },
                                     { "Базовый балл" , (string)baseScore},
                                     {"Версия метрики", (string)version },
                                     { "Вектор", (string)vectorString },
-                                    {"Дата опубликоваия", (string)published},
-                                    {"Статус" , (string)vulnStatus},
+                                    {"Дата опубликоваия", (string) cve["published"]},
+                                    {"Статус" , (string)cve["vulnStatus"]},
                                     {"Сложность доступа", (string )accessComplexity},
                                     {"Воздействие на конфиденциальность", (string )confidentialityImpact},
                                     {"Воздействие на целостность", (string)integrityImpact},
                                     {"Воздействие на доступность", (string)availabilityImpact},
                                 };
-                    }
+                }
 
-                    foreach (var reference in references)
-                        referencesList.Add((string)reference["url"]);
-                    vulnerability.Reference = referencesList;
+                foreach (var reference in references)
+                    referencesList.Add((string)reference["url"]);
+                vulnerability.Reference = referencesList;
 
-                    vulnerability.CVEidentifier = (string)id;                 
+                vulnerability.Identifier = (string)id;
+                vulnerabilitys.Add(vulnerability);
+            }
+            return vulnerabilitys;
+        }
+
+        public ObservableCollection<Vulnerability>? UpdateByPageParsing(string searchText) 
+        {
+            HtmlWeb web = new();
+            List<string> refVul = new();
+            ObservableCollection<Vulnerability> vulnerabilitys = new();
+            try
+            {
+                var htmlDoc = web.Load(searchText);
+                var numberVul = htmlDoc.DocumentNode.SelectNodes("//table[@class='result_class']/tr").Count;
+
+                for (int i = 2; i <= numberVul; i++)
+                {
+                    var refer = htmlDoc.DocumentNode.SelectSingleNode($"//table[@class='result_class']/tr[{i}]/td[1]/a[1]").Attributes["href"].Value;
+                    refVul.Add("https://jvndb.jvn.jp" + refer);
+                }
+                for (int i = 0; i < refVul.Count; i++)
+                {                                                                                                 
+                    Vulnerability vulnerability = new();
+
+                    var htmlDocument = web.Load(refVul[i]);
+                    var nodes = htmlDocument.DocumentNode.SelectNodes("//div[@id='news-list']/table[1]/tr");
+
+                    vulnerability.Identifier = htmlDocument.DocumentNode.SelectSingleNode("//div[@id='news-list']/table[1]/tr[2]").InnerText.Replace("\n", string.Empty);
+                    vulnerability.ParameterAndDescription = new()
+                    {
+                        { "Описание", htmlDocument.DocumentNode.SelectSingleNode("//div[@id='news-list']/table[1]/tr[5]").InnerText.Replace("\n", string.Empty) },
+                    };
                     vulnerabilitys.Add(vulnerability);
                 }
                 return vulnerabilitys;
             }
-            catch
+            catch (JsonException ex)
             {
+                // Проблемы с сериализацией объектов
                 return null;
-            }           
+            }
+            catch (Exception ex)
+            {
+                // Непредвиденная ошибка
+                return null;
+            }
         }
 
-        public void UpdateByPageParsing(string searchText)
+        private string GetExceptionMessage(HttpStatusCode statusCode)
         {
-
-
-            // https://jvndb.jvn.jp/search/index.php?mode=_vulnerability_search_IA_VulnSearch&lang=en&keyword=HTML
+            if (statusCode is HttpStatusCode.Forbidden)
+                return ("Сервер отказывается выполнить запрос");
+            else if (statusCode is HttpStatusCode.Gone)
+                return ("Ресурс больше недоступен");
+            else if (statusCode is HttpStatusCode.InternalServerError)
+                return ("На сервере произошла общая ошибка");
+            else if (statusCode is HttpStatusCode.ServiceUnavailable)
+                return ("Сервер временно недосутпен");
+            else
+                return ("Непредвиденная ошибка");
         }
     }
 }

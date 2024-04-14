@@ -28,6 +28,8 @@ namespace DataBaseParser
                 fileSave = true;
             };
 
+            ImportButton.Click += (s, e) => vm.ImportFile();
+
             Closing += (s, e) =>
             {
                 if (!fileSave && vm.ResaultSearch.Count > 0)
